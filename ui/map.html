@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>JeepPI – GPS Map</title>
+
+  <!-- Leaflet (local copy served by the tiny static server on 5004) -->
+  <link
+    rel="stylesheet"
+    href="vendor/leaflet/leaflet.css"
+  />
+  <script src="vendor/leaflet/leaflet.js"></script>
+
+  <style>
+    :root {
+      --bg-dark: #050814;
+      --bg-panel: rgba(255, 255, 255, 0.96);
+      --accent: #002b5c;
+      --accent-soft: rgba(0, 43, 92, 0.12);
+      --accent-text: #ffffff;
+      --text-main: #111827;
+      --text-subtle: #6b7280;
+      --danger: #b91c1c;
+      --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.28);
+      --card-radius: 22px;
+      --fab-size: 64px;
+      --speed-bar-height: 32px;
+      --search-height: 78px;
+      --turn-panel-width: 360px;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-main);
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: var(--speed-bar-height);
+      z-index: 1;
+    }
+
+    /* --- Top search bar --- */
+    #search-container {
+      position: absolute;
+      z-index: 10;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    #search-inner {
+      pointer-events: auto;
+      width: min(960px, 100%);
+      background: #f9fafb;
+      border-radius: 999px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+      border: 2px solid rgba(15, 23, 42, 0.65);
+      display: flex;
+      align-items: center;
+      padding: 10px 16px 10px 24px;
+      gap: 12px;
+    }
+
+    #search-field-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    #search-input {
+      border: none;
+      outline: none;
+      font-size: 26px;
+      font-weight: 650;
+      background: transparent;
+      color: #020617;
+      padding: 0;
+    }
+
+    #search-input::placeholder {
+      color: #9ca3af;
+    }
+
+    #from-label {
+      font-size: 14px;
+      color: #6b7280;
+    }
+
+    #go-button {
+      width: 64px;
+      height: 64px;
+      min-width: 64px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      background: var(--accent);
+      color: var(--accent-text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      transition: transform 0.08s ease, box-shadow 0.08s ease,
+        background 0.12s ease;
+    }
+
+    #go-button:active {
+      transform: translateY(1px) scale(0.98);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
+    }
+
+    #go-button.disabled {
+      background: #4b5563;
+      cursor: default;
+      opacity: 0.5;
+      box-shadow: none;
+    }
+
+    /* static arrow icon */
+    #go-button-icon {
+      font-size: 30px;
+      line-height: 1;
+      transform: translateX(2px);
+    }
+
+    /* --- Search results list --- */
+    #results-panel {
+      position: absolute;
+      z-index: 9;
+      top: calc(8px + var(--search-height));
+      left: 8px;
+      right: 8px;
+      max-width: min(960px, 100%);
+      margin-inline: auto;
+      max-height: 55vh;
+      overflow-y: auto;
+      border-radius: 24px;
+      background: rgba(10, 10, 17, 0.98);
+      box-shadow: var(--shadow-soft);
+      padding: 4px 0 8px;
+      display: none;
+    }
+
+    .result-item {
+      padding: 10px 20px 8px;
+      cursor: pointer;
+      background: transparent;
+      border-bottom: 1px solid rgba(31, 41, 55, 0.55);
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .result-item:hover {
+      background: rgba(15, 23, 42, 0.85);
+    }
+
+    .result-name {
+      font-size: 18px;
+      font-weight: 650;
+      color: #f9fafb;
+    }
+
+    .result-sub {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    /* --- Right FAB stack --- */
+    .fab-stack {
+      position: absolute;
+      z-index: 10;
+      right: 14px;
+      top: 120px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .fab {
+      width: var(--fab-size);
+      height: var(--fab-size);
+      border-radius: 999px;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #020617;
+      color: #f9fafb;
+      font-size: 22px;
+      font-weight: 650;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      cursor: pointer;
+      transition: transform 0.08s ease, box-shadow 0.08s ease,
+        background 0.12s ease, color 0.12s ease;
+    }
+
+    .fab:active {
+      transform: translateY(1px) scale(0.98);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
+    }
+
+    .fab-primary {
+      background: var(--accent);
+    }
+
+    .fab-active {
+      background: #f9fafb;
+      color: var(--accent);
+    }
+
+    /* --- Turn-by-turn panel (floating on right) --- */
+    #turn-panel {
+      position: absolute;
+      z-index: 9;
+      right: 14px;
+      top: 88px;
+      bottom: calc(var(--speed-bar-height) + 10px);
+      width: var(--turn-panel-width);
+      max-width: 96vw;
+      background: var(--bg-panel);
+      border-radius: 26px;
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(420px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.22s ease-out, opacity 0.22s ease-out;
+    }
+
+    #turn-panel.visible {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #turn-header {
+      padding: 12px 18px 6px;
+      border-bottom: 1px solid rgba(209, 213, 219, 0.9);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    #turn-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+
+    #turn-meta {
+      font-size: 14px;
+      color: #4b5563;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    #turn-eta-label {
+      font-weight: 600;
+    }
+
+    #turn-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0 8px;
+    }
+
+    .turn-step {
+      padding: 7px 14px 6px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      column-gap: 10px;
+      row-gap: 2px;
+      align-items: center;
+      border-radius: 14px;
+      margin: 4px 8px;
+      cursor: default;
+    }
+
+    .turn-step.active {
+      background: var(--accent-soft);
+      border: 1px solid rgba(37, 99, 235, 0.3);
+    }
+
+    .turn-icon {
+      grid-row: 1 / span 2;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    .turn-text-main {
+      font-size: 15px;
+      font-weight: 650;
+      color: #111827;
+    }
+
+    .turn-text-sub {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    /* --- Compact "Next turn" banner at the VERY top --- */
+    #next-turn-banner {
+      position: absolute;
+      z-index: 9;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 8px;
+      max-width: 520px;
+      width: calc(100% - 160px);
+      background: rgba(15, 23, 42, 0.92);
+      border-radius: 999px;
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+      padding: 8px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      color: #f9fafb;
+    }
+
+    #next-turn-main {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    #next-turn-sub {
+      font-size: 13px;
+      color: #d1d5db;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* --- Bottom speed bar --- */
+    #bottom-bar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: var(--speed-bar-height);
+      background: #111827;
+      display: flex;
+      align-items: center;
+      padding-left: 8px;
+      font-size: 18px;
+      color: #22c55e;
+      z-index: 8;
+      box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.5);
+    }
+
+    /* When navigation is active, hide the search bar so the banner lives at the top */
+    body.nav-active #search-container {
+      opacity: 0;
+      transform: translateY(-40px);
+      pointer-events: none;
+    }
+
+    body.results-open #results-panel {
+      display: block;
+    }
+
+    .leaflet-control-container {
+      z-index: 5;
+    }
+
+    .leaflet-control-zoom {
+      margin-top: 90px;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Search bar -->
+  <div id="search-container">
+    <div id="search-inner">
+      <div id="search-field-wrapper">
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Where to?"
+          autocomplete="off"
+        />
+        <div id="from-label">From: Current location</div>
+      </div>
+      <button id="go-button" class="disabled" aria-label="Start navigation">
+        <span id="go-button-icon">➤</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Address / place results -->
+  <div id="results-panel"></div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Compact next-turn banner -->
+  <div id="next-turn-banner" class="hidden">
+    <div id="next-turn-main">Next turn</div>
+    <div id="next-turn-sub">0.0 mi • –</div>
+  </div>
+
+  <!-- Right FABs: N = new, F = follow, V = directions visibility -->
+  <div class="fab-stack">
+    <button id="newroute-btn" class="fab fab-primary" title="New route">N</button>
+    <button id="follow-btn" class="fab" title="Follow vehicle">F</button>
+    <button id="viewturn-btn" class="fab" title="Show/hide turn-by-turn">V</button>
+  </div>
+
+  <!-- Turn-by-turn card -->
+  <div id="turn-panel">
+    <div id="turn-header">
+      <div id="turn-title">Turn by Turn</div>
+      <div id="turn-meta">
+        <span id="turn-distance">–</span>
+        <span id="turn-duration">–</span>
+        <span id="turn-eta-label">Arrive ~ –</span>
+      </div>
+    </div>
+    <div id="turn-list"></div>
+  </div>
+
+  <!-- Bottom speed / status -->
+  <div id="bottom-bar">
+    <span id="speed-text">Speed: 0.0 mph</span>
+  </div>
+
+  <script>
+    // Safe stubs so Qt doesn't complain if it calls before initMap()
+    window.setCurrentLocation = window.setCurrentLocation || function () {};
+    window.setSpeedMph = window.setSpeedMph || function () {};
+
+    /* GLOBALS */
+    let map;
+    let currentLocation = null;
+    let currentMarker = null;
+    let destMarker = null;
+    let routeLayer = null;
+    let selectedDestination = null;
+    let followVehicle = false;
+
+    const FOLLOW_ZOOM = 14;
+
+    const geocodeBase = "http://127.0.0.1:5002/geocode";
+    const routeBase   = "http://127.0.0.1:5003/route";
+
+    const searchInput = document.getElementById("search-input");
+    const goButton = document.getElementById("go-button");
+    const resultsPanel = document.getElementById("results-panel");
+    const turnPanel = document.getElementById("turn-panel");
+    const turnDistanceEl = document.getElementById("turn-distance");
+    const turnDurationEl = document.getElementById("turn-duration");
+    const turnEtaEl = document.getElementById("turn-eta-label");
+    const turnList = document.getElementById("turn-list");
+
+    const nextBanner = document.getElementById("next-turn-banner");
+    const nextBannerMain = document.getElementById("next-turn-main");
+    const nextBannerSub = document.getElementById("next-turn-sub");
+
+    const newRouteBtn = document.getElementById("newroute-btn");
+    const followBtn = document.getElementById("follow-btn");
+    const viewTurnBtn = document.getElementById("viewturn-btn");
+    const speedText = document.getElementById("speed-text");
+
+    /* -------------- Map init -------------- */
+
+    function initMap() {
+      map = L.map("map", {
+        center: [33.1032391, -96.4779642],
+        zoom: 11,
+        zoomControl: true,
+        attributionControl: true
+      });
+
+      const apiKey = "APIkey";
+      L.tileLayer(
+        `https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=${apiKey}`,
+        {
+          tileSize: 256,
+          zoomOffset: 0,
+          minZoom: 2,
+          maxZoom: 20,
+          crossOrigin: true,
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &amp; ' +
+            '<a href="https://www.maptiler.com/">MapTiler</a>'
+        }
+      ).addTo(map);
+
+      currentMarker = L.marker([33.1032391, -96.4779642]).addTo(map);
+      currentMarker.bindPopup("You");
+      currentLocation = { lat: 33.1032391, lon: -96.4779642 };
+
+      window.setCurrentLocation = function (lat, lon) {
+        if (
+          !Number.isFinite(lat) ||
+          !Number.isFinite(lon) ||
+          (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001)
+        ) {
+          console.warn("Ignored invalid GPS fix:", lat, lon);
+          return;
+        }
+
+        currentLocation = { lat, lon };
+
+        if (currentMarker) {
+          currentMarker.setLatLng([lat, lon]);
+        } else {
+          currentMarker = L.marker([lat, lon]).addTo(map);
+        }
+
+        if (followVehicle && currentLocation) {
+          const zoom = map.getZoom() < FOLLOW_ZOOM ? FOLLOW_ZOOM : map.getZoom();
+          map.setView([lat, lon], zoom);
+        }
+      };
+
+      window.setSpeedMph = function (mph) {
+        speedText.textContent = `Speed: ${mph.toFixed(1)} mph`;
+      };
+    }
+
+    initMap();
+
+    /* -------------- Utility: distance for sorting -------------- */
+
+    function haversineMiles(lat1, lon1, lat2, lon2) {
+      const R = 3958.8;
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    /* -------------- Geocoding helpers (MapTiler only) -------------- */
+
+    let searchTimeout = null;
+
+    function clearResults() {
+      resultsPanel.innerHTML = "";
+      document.body.classList.remove("results-open");
+    }
+
+    function showError(message) {
+      alert(message);
+    }
+
+    function onSearchInputChanged() {
+      const q = searchInput.value.trim();
+
+      selectedDestination = null;
+      goButton.classList.add("disabled");
+
+      if (q.length < 2) {
+        clearResults();
+        return;
+      }
+
+      if (searchTimeout) clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => performSearch(q), 280);
+    }
+
+    async function performSearch(query) {
+      let url = geocodeBase + "?q=" + encodeURIComponent(query);
+
+      if (currentLocation) {
+        url +=
+          "&lat=" +
+          encodeURIComponent(currentLocation.lat) +
+          "&lon=" +
+          encodeURIComponent(currentLocation.lon);
+      }
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+
+        if (Array.isArray(data) && data.length > 0) {
+          renderSearchResults(data);
+          return;
+        }
+
+        // no hits
+        clearResults();
+      } catch (err) {
+        console.error("Geocode error:", err);
+        showError("Address / place search error: " + err.message);
+      }
+    }
+
+    function renderSearchResults(results) {
+      clearResults();
+
+      if (!Array.isArray(results) || results.length === 0) {
+        return;
+      }
+
+      // Attach distance from currentLocation if we have one, then sort
+      let processed = results.map((r) => {
+        const lat = parseFloat(r.lat);
+        const lon = parseFloat(r.lon);
+        let distMiles = null;
+        if (
+          currentLocation &&
+          Number.isFinite(lat) &&
+          Number.isFinite(lon)
+        ) {
+          distMiles = haversineMiles(
+            currentLocation.lat,
+            currentLocation.lon,
+            lat,
+            lon
+          );
+        }
+        return { ...r, _distanceMiles: distMiles };
+      });
+
+      processed.sort((a, b) => {
+        if (a._distanceMiles == null && b._distanceMiles == null) return 0;
+        if (a._distanceMiles == null) return 1;
+        if (b._distanceMiles == null) return -1;
+        return a._distanceMiles - b._distanceMiles;
+      });
+
+      const frag = document.createDocumentFragment();
+
+      processed.forEach((r) => {
+        const name =
+          r.name ||
+          r.display_name ||
+          r.place_name ||
+          r.label ||
+          r.title ||
+          "Unknown place";
+
+        let coordPart = "";
+        const lat = parseFloat(r.lat);
+        const lon = parseFloat(r.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          coordPart = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        }
+
+        let distPart = "";
+        if (Number.isFinite(r._distanceMiles)) {
+          const d =
+            r._distanceMiles < 0.5
+              ? `${(r._distanceMiles * 5280).toFixed(0)} ft away`
+              : `${r._distanceMiles.toFixed(1)} mi away`;
+          distPart = ` • ${d}`;
+        }
+
+        const sub = coordPart + distPart;
+
+        const li = document.createElement("div");
+        li.className = "result-item";
+        li.dataset.lat = r.lat;
+        li.dataset.lon = r.lon;
+        li.dataset.name = name;
+
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "result-name";
+        nameDiv.textContent = name;
+
+        const subDiv = document.createElement("div");
+        subDiv.className = "result-sub";
+        subDiv.textContent = sub;
+
+        li.appendChild(nameDiv);
+        li.appendChild(subDiv);
+
+        li.addEventListener("click", () => {
+          onResultClicked({ lat: r.lat, lon: r.lon, name });
+        });
+
+        frag.appendChild(li);
+      });
+
+      resultsPanel.appendChild(frag);
+      document.body.classList.add("results-open");
+    }
+
+    function onResultClicked(res) {
+      const lat = parseFloat(res.lat);
+      const lon = parseFloat(res.lon);
+
+      if (Number.isNaN(lat) || Number.isNaN(lon)) {
+        showError("Result is missing coordinates.");
+        return;
+      }
+
+      if (destMarker) {
+        destMarker.setLatLng([lat, lon]);
+      } else {
+        destMarker = L.marker([lat, lon]).addTo(map);
+      }
+
+      destMarker.bindPopup("Destination");
+      map.panTo([lat, lon]);
+
+      selectedDestination = { lat, lon };
+      goButton.classList.remove("disabled");
+
+      clearResults();
+    }
+
+    /* -------------- Routing / Turn-by-turn -------------- */
+
+    function clearRoute() {
+      if (routeLayer) {
+        map.removeLayer(routeLayer);
+        routeLayer = null;
+      }
+      if (destMarker) {
+        map.removeLayer(destMarker);
+        destMarker = null;
+      }
+      selectedDestination = null;
+      turnList.innerHTML = "";
+      turnDistanceEl.textContent = "–";
+      turnDurationEl.textContent = "–";
+      turnEtaEl.textContent = "Arrive ~ –";
+      turnPanel.classList.remove("visible");
+      document.body.classList.remove("nav-active");
+      nextBanner.classList.add("hidden");
+    }
+
+    function formatDistance(meters) {
+      const miles = meters * 0.000621371;
+      if (miles < 0.1) {
+        return `${(miles * 5280).toFixed(0)} ft`;
+      }
+      return `${miles.toFixed(1)} mi`;
+    }
+
+    function formatDuration(seconds) {
+      const mins = Math.round(seconds / 60);
+      if (mins < 60) return `${mins} min`;
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${h} hr ${m} min`;
+    }
+
+    function formatEta(seconds) {
+      const now = new Date();
+      const arrival = new Date(now.getTime() + seconds * 1000);
+      let h = arrival.getHours();
+      const m = arrival.getMinutes().toString().padStart(2, "0");
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12;
+      if (h === 0) h = 12;
+      return `${h}:${m} ${ampm}`;
+    }
+
+    function maneuverIcon(maneuver) {
+      if (!maneuver) return "•";
+      const type = maneuver.type || "";
+      const mod = maneuver.modifier || "";
+
+      if (type === "depart") return "↑";
+      if (type === "arrive") return "◎";
+
+      if (mod === "left" || mod === "slight left") return "←";
+      if (mod === "right" || mod === "slight right") return "→";
+      if (mod === "uturn") return "⤿";
+      if (type === "roundabout") return "ⓡ";
+      return "↑";
+    }
+
+    function bestStepName(step) {
+      if (!step) return "Continue";
+
+      let name = (step.name || "").trim();
+
+      if (!name || name.toLowerCase() === "unnamed road") {
+        if (step.ref && step.ref.trim()) {
+          name = step.ref.trim();
+        } else if (step.destinations && step.destinations.trim()) {
+          name = step.destinations.trim();
+        } else {
+          name = "the road";
+        }
+      }
+
+      return name;
+    }
+
+    function renderTurnByTurn(steps, distanceMeters, durationSeconds) {
+      turnList.innerHTML = "";
+
+      const totalDist = formatDistance(distanceMeters);
+      const totalDur = formatDuration(durationSeconds);
+      const eta = formatEta(durationSeconds);
+
+      turnDistanceEl.textContent = totalDist;
+      turnDurationEl.textContent = totalDur;
+      turnEtaEl.textContent = `Arrive ~ ${eta}`;
+
+      const frag = document.createDocumentFragment();
+
+      steps.forEach((step, idx) => {
+        const li = document.createElement("div");
+        li.className = "turn-step" + (idx === 0 ? " active" : "");
+
+        const icon = document.createElement("div");
+        icon.className = "turn-icon";
+        icon.textContent = maneuverIcon(step.maneuver);
+        li.appendChild(icon);
+
+        const main = document.createElement("div");
+        main.className = "turn-text-main";
+        main.textContent = `${idx + 1}. ${
+          step.maneuver && step.maneuver.type === "arrive"
+            ? "Arrive at destination"
+            : step.maneuver && step.maneuver.type === "depart"
+            ? "Head " + (bestStepName(step) || "")
+            : step.maneuver
+            ? step.maneuver.instruction || `Turn onto ${bestStepName(step)}`
+            : "Continue"
+        }`;
+        li.appendChild(main);
+
+        const sub = document.createElement("div");
+        sub.className = "turn-text-sub";
+        sub.textContent = formatDistance(step.distance || 0);
+        li.appendChild(sub);
+
+        frag.appendChild(li);
+      });
+
+      turnList.appendChild(frag);
+      turnPanel.classList.add("visible");
+      document.body.classList.add("nav-active");
+
+      // update compact banner with first step
+      if (steps.length > 0) {
+        const step0 = steps[0];
+        const name0 = bestStepName(step0);
+        const dist0 = formatDistance(step0.distance || 0);
+
+        let line1;
+        if (step0.maneuver && step0.maneuver.type === "arrive") {
+          line1 = "Arrive at destination";
+        } else if (step0.maneuver && step0.maneuver.type === "depart") {
+          line1 = "Head " + name0;
+        } else if (step0.maneuver && step0.maneuver.instruction) {
+          line1 = step0.maneuver.instruction;
+        } else {
+          line1 = "Continue on " + name0;
+        }
+
+        nextBannerMain.textContent = line1;
+        nextBannerSub.textContent = `${dist0} • ${name0}`;
+        nextBanner.classList.remove("hidden");
+      } else {
+        nextBanner.classList.add("hidden");
+      }
+    }
+
+    async function fetchRoute() {
+      if (!currentLocation || !selectedDestination) {
+        showError("Need both a start and destination.");
+        return;
+      }
+
+      const start = `${currentLocation.lon},${currentLocation.lat}`;
+      const end = `${selectedDestination.lon},${selectedDestination.lat}`;
+
+      const url =
+        routeBase +
+        "?start=" +
+        encodeURIComponent(start) +
+        "&end=" +
+        encodeURIComponent(end);
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+
+        if (!data || data.code !== "Ok" || !data.routes || !data.routes[0]) {
+          showError("No route found.");
+          return;
+        }
+
+        const route = data.routes[0];
+
+        const coords = route.geometry.coordinates.map((c) => [c[1], c[0]]);
+        if (routeLayer) {
+          map.removeLayer(routeLayer);
+        }
+        routeLayer = L.polyline(coords, {
+          color: "#2563eb",
+          weight: 6
+        }).addTo(map);
+
+        map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+
+        const leg = route.legs && route.legs[0];
+        const steps = leg && Array.isArray(leg.steps) ? leg.steps : [];
+
+        renderTurnByTurn(steps, route.distance, route.duration);
+      } catch (err) {
+        console.error("Routing error:", err);
+        showError("Error fetching route: " + err.message);
+      }
+    }
+
+    /* -------------- UI wiring -------------- */
+
+    searchInput.addEventListener("input", onSearchInputChanged);
+
+    goButton.addEventListener("click", () => {
+      if (goButton.classList.contains("disabled")) return;
+      fetchRoute();
+    });
+
+    newRouteBtn.addEventListener("click", () => {
+      clearRoute();
+      searchInput.value = "";
+      goButton.classList.add("disabled");
+      clearResults();
+    });
+
+    followBtn.addEventListener("click", () => {
+      followVehicle = !followVehicle;
+      if (followVehicle) {
+        followBtn.classList.add("fab-active");
+        if (currentLocation) {
+          map.setView(
+            [currentLocation.lat, currentLocation.lon],
+            FOLLOW_ZOOM
+          );
+        }
+      } else {
+        followBtn.classList.remove("fab-active");
+      }
+    });
+
+    viewTurnBtn.addEventListener("click", () => {
+      if (turnPanel.classList.contains("visible")) {
+        turnPanel.classList.remove("visible");
+      } else {
+        if (turnList.children.length > 0) {
+          turnPanel.classList.add("visible");
+        }
+      }
+    });
+
+    map.on("click", () => {
+      clearResults();
+    });
+
+    window.resetNavigation = function () {
+      clearRoute();
+      searchInput.value = "";
+      goButton.classList.add("disabled");
+    };
+  </script>
+</body>
+</html>
